@@ -21,6 +21,20 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/users
+    depends_on:
+      mongo:
+        condition: service_healthy
+    
+  task-service:
+    build: ./task-service
+    container_name: task-service
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/tasks
     depends_on:
       mongo:
         condition: service_healthy

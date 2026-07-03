@@ -8,8 +8,8 @@ const express = require('express');
 const app = express();
 const mongoose = require('mongoose');
 const bodyParser = require('body-parser')
-const port = 3000;
-const mongoUri = process.env.MONGODB_URI || 'mongodb://mongo:27017/users';
+const port = process.env.PORT || 3000;
+const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/users';
 
 const userSchema = new mongoose.Schema({
     name: String,
@@ -31,8 +31,8 @@ app.post('/users', async (req, res) => {
         res.status(201).json(user)
     }
     catch (err) {
-        console.log("Error in saving", err);
-        res.status(501).json("error in saving")
+        console.log("Error in creating user", err);
+        res.status(501).json("error in creating user")
 
     }
 })
@@ -68,7 +68,7 @@ async function startServer() {
     try {
         await connectWithRetry()
         app.listen(port, () => {
-            console.log(`Example app listening on port ${port}`);
+            console.log(`user-service listening on port ${port}`);
         })
     } catch (err) {
         console.error('Server failed to start', err)
