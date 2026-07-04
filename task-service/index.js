@@ -4,7 +4,8 @@ const mongoose = require('mongoose');
 const bodyParser = require('body-parser')
 const port = process.env.PORT || 3001;
 const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/tasks';
-
+const amqp = require('amqplib');
+const rabbitmqUrl = process.env.RABBITMQ_URL || 'amqp://127.0.0.1:5672';
 
 
 const taskSchema = new mongoose.Schema({
@@ -20,6 +21,14 @@ const taskSchema = new mongoose.Schema({
 const Task = mongoose.model("Task", taskSchema)
 
 app.use(bodyParser.json())
+
+app.get('/', (req, res) => {
+    res.json({ status: 'task-service is running' })
+})
+
+app.get('/.well-known/appspecific/com.chrome.devtools.json', (req, res) => {
+    res.status(204).end()
+})
 
 async function connectWithRetry(retries = 5, delayMs = 3000) {
     for (let attempt = 1; attempt <= retries; attempt += 1) {
@@ -49,16 +58,62 @@ async function startServer() {
     }
 }
 
+async function publishTaskCreated(task, retries = 5, delayMs = 3000) {
+    for (let attempt = 1; attempt <= retries; attempt += 1) {
+        let connection;
+        try {
+            connection = await amqp.connect(rabbitmqUrl);
+            const channel = await connection.createConfirmChannel();
+            await channel.assertQueue('task_created', { durable: true });
+
+            const sent = channel.sendToQueue(
+                'task_created',
+                Buffer.from(JSON.stringify(task)),
+                { persistent: true }
+            );
+
+            if (!sent) {
+                throw new Error('RabbitMQ write buffer is full');
+            }
+
+            await channel.waitForConfirms();
+            console.log('Task created notification sent');
+            return;
+        } catch (err) {
+            console.error(`Error publishing task_created message (attempt ${attempt}/${retries})`, err);
+            if (attempt === retries) {
+                throw err;
+            }
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+        } finally {
+            if (connection) {
+                await connection.close().catch(() => {});
+            }
+        }
+    }
+}
+
 app.post('/tasks', async (req, res) => {
     const { title, description, userId } = req.body
     try {
         const task = new Task({ title, description, userId })
         await task.save()
+
+        try {
+            await publishTaskCreated(task)
+        } catch (publishErr) {
+            console.error('Failed to publish task_created event', publishErr)
+            return res.status(502).json({
+                error: 'Task saved, but RabbitMQ notification failed',
+                task
+            })
+        }
+
         res.status(201).json(task)
     }
     catch (err) {
         console.log("Error in creating task", err);
-        res.status(501).json("error in creating task")
+        res.status(500).json("error in creating task")
 
     }
 })
